@@ -356,7 +356,7 @@ struct Options
         numsteps=1;
         MaxIDValue=512*512*512;
         TotalNumberofHalos=0;
-        iexclusiveids=1;
+        iexclusiveids=0;
         iposinfoflag=0;
 
         isearchdirection=SEARCHPROGEN;

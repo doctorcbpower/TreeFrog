@@ -72,314 +72,6 @@ Double_t CalculateMerit(Options &opt, UInt_t n1, UInt_t n2, UInt_t nsh, HaloData
   \todo still need to clean up core matching section and implement \ref PARTLISTCORECOREONLY
 */
 
-ProgenitorData *CrossMatch(Options &opt, const long unsigned nhalos1, const long unsigned nhalos2, HaloData *&h1, HaloData *&h2, unsigned int*&pfof2, int &ilistupdated, int istepval, ProgenitorData *refprogen)
-{
-    long int i,j,k,n;
-    int nthreads=1,tid,maxnthreads=1,chunksize;
-    long unsigned offset;
-    //temp variable to store the openmp reduction value for ilistupdated
-    int newilistupdated;
-    //setup openmp environment
-#ifdef USEOPENMP
-#pragma omp parallel
-    {
-    if (omp_get_thread_num()==0) nthreads=omp_get_num_threads();
-    if (omp_get_thread_num()==0) maxnthreads=omp_get_num_threads();
-    }
-    //set the active number of threads based on breaking up computation in large enough chunks
-    nthreads=min((int)ceil((double)nhalos1/(double)OMPCHUNKSIZE),maxnthreads);
-    omp_set_num_threads(nthreads);
-    chunksize=OMPCHUNKSIZE;
-#endif
-
-    ProgenitorData *p1=new ProgenitorData[nhalos1];
-    unsigned int *sharelist,*halolist;
-    long unsigned num_noprogen, ntotitems;
-    long unsigned *needprogenlist;
-    //init that list is updated if no reference list is provided
-    if (refprogen==NULL) ilistupdated=1;
-    //otherwise assume list is not updated
-    else ilistupdated=0;
-    newilistupdated=ilistupdated;
-
-    //if there are halos to link
-    if (nhalos2>0){
-    //if a reference list is not provided, then build for every halo
-    if (refprogen==NULL) {
-    ntotitems=nhalos2*(long unsigned)nthreads;
-    sharelist=new unsigned int[ntotitems];
-    halolist=new unsigned int[ntotitems];
-    //to store haloes that share links and the halo index of those shared haloes
-    for (i=0;i<ntotitems;i++)sharelist[i]=0;
-
-    offset=0;
-#ifdef USEOPENMP
-#pragma omp parallel default(shared) \
-private(i,tid,offset)
-{
-        //initialize variables
-        tid=omp_get_thread_num();
-        offset=((long unsigned)tid)*nhalos2;
-#pragma omp for schedule(dynamic,chunksize) nowait
-#endif
-    for (i=0;i<nhalos1;i++){
-        CrossMatchProgenitorIndividual(opt, i, nhalos1, nhalos2, h1, h2,  pfof2, istepval, p1, sharelist, halolist, offset);
-    }
-#ifdef USEOPENMP
-}
-#endif
-    delete[] sharelist;
-    delete[] halolist;
-    }
-    //if a reference list is provided then only link halos with no current link
-    else {
-    //check to see if haloes need to search at all
-    num_noprogen=0;
-    for (i=0;i<nhalos1;i++){
-        p1[i].NumberofProgenitors=0;p1[i].ProgenitorList=NULL;p1[i].Merit=NULL;
-        //always search objects that have no progenitors
-        if (refprogen[i].NumberofProgenitors==0) {
-            num_noprogen+=1;
-        }
-        // if object has a progenitor, then futher searching depends on
-        //what multistep criterion was set
-        else {
-            //if also applying merit limit then search if does not meet merit threshold
-            if (opt.imultsteplinkcrit==MSLCMERIT) {
-                if (refprogen[i].Merit[0]<opt.meritlimit) num_noprogen+=1;
-            }
-        }
-    }
-    //only allocate memory and process list if there are any haloes needing to be searched
-    if (num_noprogen>0) {
-        //set OpenMP environment
-#ifdef USEOPENMP
-        //set the active number of threads based on breaking up computation in large enough chunks
-        nthreads=min((int)ceil((double)num_noprogen/(double)OMPCHUNKSIZE),maxnthreads);
-        omp_set_num_threads(nthreads);
-#endif
-        needprogenlist=new long unsigned[num_noprogen];
-        num_noprogen=0;
-        for (i=0;i<nhalos1;i++){
-            if (refprogen[i].NumberofProgenitors==0){
-                needprogenlist[num_noprogen++]=i;
-            }
-            //if also applying merit limit then search if does not meet merit threshold
-            if (opt.imultsteplinkcrit==MSLCMERIT && refprogen[i].NumberofProgenitors>0) {
-                if (refprogen[i].Merit[0]<opt.meritlimit) needprogenlist[num_noprogen++]=i;
-            }
-        }
-
-        ntotitems=nhalos2*(long unsigned)nthreads;
-        sharelist=new unsigned int[ntotitems];
-        halolist=new unsigned int[ntotitems];
-        for (i=0;i<ntotitems;i++)sharelist[i]=0;
-
-        offset=0;
-#ifdef USEOPENMP
-#pragma omp parallel default(shared) \
-private(i,k,tid,offset)
-{
-        //initialize variables
-        tid=omp_get_thread_num();
-        offset=((long unsigned)tid)*nhalos2;
-#pragma omp parallel for schedule(dynamic,chunksize) reduction(+:newilistupdated)
-#endif
-        for (k=0;k<num_noprogen;k++){
-            i=needprogenlist[k];
-            newilistupdated+=CrossMatchProgenitorIndividual(opt, i, nhalos1, nhalos2, h1, h2,  pfof2, istepval, p1, sharelist, halolist, offset);
-        }
-#ifdef USEOPENMP
-}
-#endif
-        delete[] sharelist;
-        delete[] halolist;
-        delete[] needprogenlist;
-    }
-    //end of if statement for progenitors more than one snap ago if any current haloes need to be searched
-    ilistupdated=newilistupdated;
-    }
-    //end of progenitors more than one snap ago
-    }
-    //if no halos then there are no links
-    else {
-        for (i=0;i<nhalos1;i++){
-            p1[i].NumberofProgenitors=0;
-            p1[i].ProgenitorList=NULL;p1[i].Merit=NULL;
-        }
-    }
-
-    //reset number of threads back to maximum
-#ifdef USEOPENMP
-#pragma omp parallel
-        omp_set_num_threads(maxnthreads);
-#endif
-    return p1;
-}
-
-int CrossMatchProgenitorIndividual(Options &opt, Int_t i,
-    const long unsigned nhalos1, const long unsigned nhalos2,
-    HaloData *&h1, HaloData *&h2,
-    unsigned int *&pfof2,
-    int istepval,
-    ProgenitorData *&p1,
-    unsigned int *&sharelist,
-    unsigned int *&halolist,
-    long unsigned offset
-    //unsigned int *&sharepartlist,
-    //unsigned int *&pranking2,
-    //Double_t *&rankingsum
-    )
-{
-    long int j,k,index;
-    Int_t numshared;
-    Double_t merit;
-    long long hid;
-    PriorityQueue *pq,*pq2;
-    UInt_t np1,np2;
-    numshared=0;
-    //go through halos particle list to see if these particles belong to another halo
-    //at a different time/in a different catalog
-    np1=h1[i].NumberofParticles;
-    //if doing core to all matching as set by icorematchtype==PARTLISTCORE
-    //then adjust number of particles searched. This does require particles
-    //to be meaningfully sorted.
-    if (opt.icorematchtype==PARTLISTCORE && opt.particle_frac<1 && opt.particle_frac>0) {
-        np1*=opt.particle_frac;
-        if (np1<opt.min_numpart) np1=opt.min_numpart;
-        if (np1>h1[i].NumberofParticles) np1=h1[i].NumberofParticles;
-    }
-    for (j=0;j<np1;j++){
-        hid=pfof2[h1[i].ParticleID[j]];
-        //correction if use core weighted particles as well.
-        if (opt.particle_frac<1 && opt.particle_frac>0 && hid>nhalos2) hid-=nhalos2;
-        //store the index in the share and halolist arrays
-        index=offset+hid-(long int)1;
-        if (hid>0) {
-            sharelist[index]+=1;
-            //if first time halo has been added, update halolist and increase numshared
-            if (sharelist[index]==1) halolist[offset+numshared++]=hid-1;
-        }
-    }
-    //now proccess numshared list to remove truly insignificant connections
-    for (k=0;k<numshared;k++) {
-        j=halolist[offset+k];
-        index=offset+j;
-        //if sharelist not enough, then move to end and decrease numshared
-        np2=h2[j].NumberofParticles;
-        //adjust the expecte number of matches if only expecting to match core particles
-        if (opt.icorematchtype==PARTLISTCORE && opt.particle_frac<1 && opt.particle_frac>0) {
-            np2*=opt.particle_frac;
-            if (np2<opt.min_numpart) np2=opt.min_numpart;
-            if (np2>h2[j].NumberofParticles) np2=h2[j].NumberofParticles;
-        }
-        if(sharelist[index]<opt.mlsig*sqrt((Double_t)np2) && sharelist[index]<opt.mlsig*sqrt((Double_t)np1)) {
-            halolist[offset+k]=halolist[offset+numshared-1];
-            sharelist[index]=0;
-            k--;
-            numshared--;
-        }
-    }
-    //now calculate merits and sort according to best merit.
-    if (numshared>0) {
-        //store all viable matches
-        pq=new PriorityQueue(numshared);
-        for (k=0;k<numshared;k++) {
-            j=halolist[offset+k];
-            index=offset+j;
-            np2=h2[j].NumberofParticles;
-            //adjust the expecte number of matches if only expecting to match core particles
-            if (opt.icorematchtype==PARTLISTCORE && opt.particle_frac<1 && opt.particle_frac>0) {
-                np2*=opt.particle_frac;
-                if (np2<opt.min_numpart) np2=opt.min_numpart;
-                if (np2>h2[j].NumberofParticles) np2=h2[j].NumberofParticles;
-            }
-            merit=CalculateMerit(opt,np1,np2,sharelist[index],h1[i],h2[j]);
-            pq->Push(j,merit);
-            sharelist[index]=0;
-        }
-        p1[i].NumberofProgenitors=numshared;
-        p1[i].ProgenitorList=new long unsigned[numshared];
-        p1[i].Merit=new float[numshared];
-        p1[i].nsharedfrac=new float[numshared];
-        for (j=0;j<numshared;j++){
-            p1[i].ProgenitorList[j]=pq->TopQueue();
-            p1[i].Merit[j]=pq->TopPriority();
-            pq->Pop();
-        }
-        p1[i].istep=istepval;
-        delete pq;
-    }
-    //if the number shared is zero, do nothing
-    else {p1[i].ProgenitorList=NULL;p1[i].Merit=NULL;}
-
-    //if matching core to core
-    if (opt.icorematchtype==PARTLISTCORECORE && opt.particle_frac<1 && opt.particle_frac>0 && numshared>0) {
-        //calculate number of particles
-        np1=(h1[i].NumberofParticles*opt.particle_frac);
-        //if halo has enough particle for meaningful most bound particles check, proceed to find merits. Similar to normal merit
-        //calculations but have now np2 for calculating merits
-        if (np1>=opt.min_numpart) {
-            numshared=0;
-            for (j=0;j<np1;j++){
-                //only use particles that belong to the core of another group, that is the hid is > nhalos2
-                hid=pfof2[h1[i].ParticleID[j]]-nhalos2;
-                index=offset+hid-(long int)1;
-                if (hid>0) {
-                    sharelist[index]+=1;
-                    if (sharelist[index]==1) halolist[offset+numshared++]=hid-1;
-                }
-            }
-            for (k=0;k<numshared;k++) {
-                j=halolist[offset+k];
-                index=offset+j;
-                np2=h2[j].NumberofParticles*opt.particle_frac;
-                if (h2[j].NumberofParticles<opt.min_numpart) np2=h2[j].NumberofParticles;
-                else if (np2<opt.min_numpart) np2=opt.min_numpart;
-                //if sharelist not enough, then move to end and decrease numshared
-                if(sharelist[index]<opt.mlsig*sqrt((Double_t)np2) && sharelist[index]<opt.mlsig*sqrt((Double_t)np1)){
-                    halolist[offset+k]=halolist[offset+numshared-1];
-                    sharelist[index]=0;
-                    k--;
-                    numshared--;
-                }
-            }
-            if (numshared>0) {
-                //store all viable matches and old ones too
-                pq2=new PriorityQueue(numshared+p1[i].NumberofProgenitors);
-                for (k=0;k<numshared;k++) {
-                    j=halolist[offset+k];
-                    index=offset+j;
-                    np2=h2[j].NumberofParticles*opt.particle_frac;
-                    if (h2[j].NumberofParticles<opt.min_numpart) np2=h2[j].NumberofParticles;
-                    else if (np2<opt.min_numpart) np2=opt.min_numpart;
-                    merit=CalculateMerit(opt,np1,np2,sharelist[index],h1[i],h2[j]);
-                    pq2->Push(j,merit);
-                    sharelist[index]=0;
-                }
-                //really only care about adjust the best match found if any
-                for (j=0;j<p1[i].NumberofProgenitors;j++) pq2->Push(p1[i].ProgenitorList[j],p1[i].Merit[j]);
-                //if most bound particle matching is not the same as overall matching, lets rearrange match
-                if (pq2->TopQueue()!=p1[i].ProgenitorList[0]) {
-                    for (j=0;j<p1[i].NumberofProgenitors;j++) if (p1[i].ProgenitorList[j]==pq2->TopQueue()) {
-                        p1[i].ProgenitorList[j]=p1[i].ProgenitorList[0];
-                        p1[i].Merit[j]=p1[i].Merit[0];
-                        p1[i].ProgenitorList[0]=pq2->TopQueue();
-                        p1[i].Merit[0]=pq2->TopPriority();
-                        break;
-                    }
-                    p1[i].istep=istepval;
-                    delete pq2;
-                }
-            }
-            //end of numshared>0 check
-        }
-        //end of halo has enough particles for weighted (bound fraction) merit adjustment
-    }
-    //end of weighted (based on most bound particles) merit
-    return (numshared>0);
-}
-
 ///effectively the same code as \ref CrossMatch but allows for the possibility of matching descendant/child nodes using a different merit function
 ///here the lists are different as input order is reverse of that used in \ref CrossMatch
 DescendantData *CrossMatchDescendant(Options &opt, const long unsigned nhalos1, const long unsigned nhalos2,
@@ -393,17 +85,17 @@ DescendantData *CrossMatchDescendant(Options &opt, const long unsigned nhalos1, 
     int newilistupdated;
     int initdtopval;
     //setup openmp environment
-#ifdef USEOPENMP
-#pragma omp parallel
-    {
-    if (omp_get_thread_num()==0) nthreads=omp_get_num_threads();
-    if (omp_get_thread_num()==0) maxnthreads=omp_get_num_threads();
-    }
-    //set the active number of threads based on breaking up computation in large enough chunks
-    nthreads=min((int)ceil((double)nhalos1/(double)OMPCHUNKSIZE),maxnthreads);
-    omp_set_num_threads(nthreads);
-    chunksize=OMPCHUNKSIZE;
-#endif
+//#ifdef USEOPENMP
+//#pragma omp parallel
+//    {
+//    if (omp_get_thread_num()==0) nthreads=omp_get_num_threads();
+//    if (omp_get_thread_num()==0) maxnthreads=omp_get_num_threads();
+//    }
+//    //set the active number of threads based on breaking up computation in large enough chunks
+//    nthreads=min((int)ceil((double)nhalos1/(double)OMPCHUNKSIZE),maxnthreads);
+//    omp_set_num_threads(nthreads);
+//    chunksize=OMPCHUNKSIZE;
+//#endif
 
     DescendantData *d1=new DescendantData[nhalos1];
     unsigned int *sharelist, *halolist, *sharepartlist=NULL;
@@ -439,23 +131,23 @@ DescendantData *CrossMatchDescendant(Options &opt, const long unsigned nhalos1, 
     //to store haloes that share links and the halo index of those shared haloes
     for (i=0;i<ntotitems;i++)sharelist[i]=0;
     offset=offset2=0;
-#ifdef USEOPENMP
-#pragma omp parallel default(shared) \
-private(i,tid,offset,offset2)
-{
-        //initialize variables
-        tid=omp_get_thread_num();
-        offset=((long unsigned)tid)*nhalos2;
-        offset2=((long unsigned)tid)*nbiggest;
-#pragma omp for schedule(dynamic,chunksize) nowait
-#endif
+//#ifdef USEOPENMP
+//#pragma omp parallel default(shared) \
+//private(i,tid,offset,offset2)
+//{
+//        //initialize variables
+//        tid=omp_get_thread_num();
+//        offset=((long unsigned)tid)*nhalos2;
+//        offset2=((long unsigned)tid)*nbiggest;
+//#pragma omp for schedule(dynamic,chunksize) nowait
+//#endif
     for (i=0;i<nhalos1;i++){
         CrossMatchDescendantIndividual(opt, i, nhalos1, nhalos2, h1, h2, pfof2, istepval, initdtopval, d1,
             sharelist, halolist, offset, offset2, sharepartlist, pranking2, rankingsum);
     }
-#ifdef USEOPENMP
-}
-#endif
+//#ifdef USEOPENMP
+//}
+//#endif
         delete[] sharelist;
         delete[] halolist;
     }
@@ -480,11 +172,11 @@ private(i,tid,offset,offset2)
     //only allocate memory and process list if there are any haloes needing to be searched
     if (num_nodescen>0) {
         //set OpenMP environment
-#ifdef USEOPENMP
-        //set the active number of threads based on breaking up computation in large enough chunks
-        nthreads=min((int)ceil((double)num_nodescen/(double)OMPCHUNKSIZE),maxnthreads);
-        omp_set_num_threads(nthreads);
-#endif
+//#ifdef USEOPENMP
+//        //set the active number of threads based on breaking up computation in large enough chunks
+//        nthreads=min((int)ceil((double)num_nodescen/(double)OMPCHUNKSIZE),maxnthreads);
+//        omp_set_num_threads(nthreads);
+//#endif
         needdescenlist=new long unsigned[num_nodescen];
         num_nodescen=0;
         for (i=0;i<nhalos1;i++){
@@ -505,24 +197,24 @@ private(i,tid,offset,offset2)
         for (i=0;i<ntotitems;i++)sharelist[i]=0;
 
         offset=offset2=0;
-#ifdef USEOPENMP
-#pragma omp parallel default(shared) \
-private(i,k,tid,offset,offset2)
-{
-        //initialize variables
-        tid=omp_get_thread_num();
-        offset=((long unsigned)tid)*nhalos2;
-        offset2=((long unsigned)tid)*nbiggest;
-#pragma omp parallel for schedule(dynamic,chunksize) reduction(+:newilistupdated)
-#endif
+//#ifdef USEOPENMP
+//#pragma omp parallel default(shared) \
+//private(i,k,tid,offset,offset2)
+//{
+//        //initialize variables
+//        tid=omp_get_thread_num();
+//        offset=((long unsigned)tid)*nhalos2;
+//        offset2=((long unsigned)tid)*nbiggest;
+//#pragma omp parallel for schedule(dynamic,chunksize) reduction(+:newilistupdated)
+//#endif
         for (k=0;k<num_nodescen;k++){
             i=needdescenlist[k];
             newilistupdated+=CrossMatchDescendantIndividual(opt, i, nhalos1, nhalos2, h1, h2, pfof2, istepval, initdtopval, d1,
                 sharelist, halolist, offset, offset2, sharepartlist, pranking2, rankingsum);
         }
-#ifdef USEOPENMP
-}
-#endif
+//#ifdef USEOPENMP
+//}
+//#endif
         delete[] sharelist;
         delete[] halolist;
         delete[] needdescenlist;
@@ -544,10 +236,10 @@ private(i,k,tid,offset,offset2)
         }
     }
     //reset number of threads back to maximum
-#ifdef USEOPENMP
-#pragma omp parallel
-        omp_set_num_threads(maxnthreads);
-#endif
+//#ifdef USEOPENMP
+//#pragma omp parallel
+//        omp_set_num_threads(maxnthreads);
+//#endif
     return d1;
 }
 
@@ -813,21 +505,21 @@ void UpdateDescendantIndexing(const int istepval, const long unsigned nhalos1, c
 {
     Int_t i,j,k;
     int nthreads=1,tid;
-    //adjust data to store haloIDS
-#ifdef USEOPENMP
-#pragma omp parallel default(shared) \
-private(i,j,k)
-{
-#pragma omp for schedule(dynamic,10) nowait
-#endif
+//    //adjust data to store haloIDS
+//#ifdef USEOPENMP
+//#pragma omp parallel default(shared) \
+//private(i,j,k)
+//{
+//#pragma omp for schedule(dynamic,10) nowait
+//#endif
     for (i=0;i<nhalos1;i++) if (p1[i].istep==istepval){
         for(j=0;j<p1[i].NumberofDescendants;j++) {
             p1[i].DescendantList[j]=h2[p1[i].DescendantList[j]].haloID;
         }
     }
-#ifdef USEOPENMP
-}
-#endif
+//#ifdef USEOPENMP
+//}
+//#endif
 }
 
 ///now adjust the rankings of the progenitor descendant matches. Here the logic is applied so that if
@@ -1032,54 +724,6 @@ void CleanDescendantsForMissingProgenitors(Options &opt, Int_t itime, HaloTreeDa
 }
 //@}
 
-///\name Multistep linking routines for progenitor based searches
-//@{
-///when linking using multiple snapshots, use to update the progenitor list based on a candidate list built using a single snapshot
-///If complex updating done, then will need to update the progenitor based descendant list.
-void UpdateRefProgenitors(Options &opt, const Int_t numhalos, ProgenitorData *&pref, ProgenitorData *&ptemp, DescendantDataProgenBased **&pprogendescen, Int_t itime)
-{
-    if (opt.imultsteplinkcrit==MSLCMISSING) {
-        for (Int_t i=0;i<numhalos;i++)
-            if (pref[i].NumberofProgenitors==0 && ptemp[i].NumberofProgenitors>0) pref[i]=ptemp[i];
-    }
-    else if (opt.imultsteplinkcrit==MSLCMERIT) {
-        for (Int_t i=0;i<numhalos;i++) {
-            //if reference has no links but new links found, copy
-            if (pref[i].NumberofProgenitors==0 && ptemp[i].NumberofProgenitors>0) pref[i]=ptemp[i];
-            //if reference has no links but new links found also copy as reference did not satisfy merit limit
-            else if (pref[i].NumberofProgenitors>0 && ptemp[i].NumberofProgenitors>0) {
-                //but only update if new link satisfies merit limit
-                if (ptemp[i].Merit[0]>opt.meritlimit) {
-                    //first must update the progenitor based descendant list
-                    RemoveLinksProgenitorBasedDescendantList(itime, i, pref[i], pprogendescen);
-                    //then copy new links
-                    pref[i]=ptemp[i];
-                }
-            }
-        }
-    }
-}
-
-///Construction of descendant list using the candidate progenitor list
-void BuildProgenitorBasedDescendantList(Int_t itimeprogen, Int_t itimedescen, Int_t nhalos, ProgenitorData *&pprogen, DescendantDataProgenBased **&pprogendescen, int istep)
-{
-    //if first pass then store descendants looking at all progenitors
-    int did;
-    for (Int_t k=0;k<nhalos;k++) {
-        for (Int_t iprogen=0;iprogen<pprogen[k].NumberofProgenitors;iprogen++) if (pprogen[k].istep==istep) {
-            did=pprogen[k].ProgenitorList[iprogen]-1;//make sure halo descendent index set to start at 0
-            pprogendescen[itimedescen][did].haloindex.push_back(k);
-            pprogendescen[itimedescen][did].halotemporalindex.push_back(itimeprogen);
-            pprogendescen[itimedescen][did].Merit.push_back(pprogen[k].Merit[iprogen]);
-            pprogendescen[itimedescen][did].deltat.push_back(istep);
-            pprogendescen[itimedescen][did].descentype.push_back(iprogen);
-#ifdef USEMPI
-            pprogendescen[itimedescen][did].MPITask.push_back(ThisTask);
-#endif
-            pprogendescen[itimedescen][did].NumberofDescendants++;
-        }
-    }
-}
 
 //removes links of an individual halo
 void RemoveLinksProgenitorBasedDescendantList(Int_t itime, Int_t ihaloindex, ProgenitorData &pprogen, DescendantDataProgenBased **&pprogendescen)
@@ -1109,52 +753,6 @@ void RemoveLinksProgenitorBasedDescendantList(Int_t itime, Int_t ihaloindex, Pro
         pprogendescen[itimedescen][did].NumberofDescendants--;
     }
 }
-
-///Cleans the progenitor list to ensure that a given object only has a single descendant using the descendant list built using progenitors. Called if linking across multiple snapshots
-void CleanProgenitorsUsingDescendants(Int_t i, HaloTreeData *&pht, DescendantDataProgenBased **&pprogendescen, ProgenitorData **&pprogen, int iopttemporalmerittype)
-{
-    unsigned long itime;
-    unsigned long hid;
-#ifdef USEMPI
-    int itask;
-#endif
-    int itemp;
-    //parse list of descendants for objects with more than one and adjust the progenitor list
-    for (Int_t k=0;k<pht[i].numhalos;k++) if (pprogendescen[i][k].NumberofDescendants>1){
-        //adjust the progenitor list of all descendents affected, ie: that will have the progenitor removed from the list
-        //note that the optimal descendant is always placed at position 0
-        pprogendescen[i][k].OptimalTemporalMerit(iopttemporalmerittype);
-#ifdef USEMPI
-        //if mpi, it is possible that the best match is not a local halo
-        ///\todo do I need to do anything when the best descendant is not local to mpi domain? I don't think so since only
-        ///matters if I am changing the local list
-#endif
-        for (Int_t n=1;n<pprogendescen[i][k].NumberofDescendants;n++) {
-            itime=pprogendescen[i][k].halotemporalindex[n];
-            hid=pprogendescen[i][k].haloindex[n];
-#ifdef USEMPI
-            //if mpi is invoked, it possible the progenitor that is supposed to have a descendant removed is not on this mpi task
-            itask=pprogendescen[i][k].MPITask[n];
-            //only change progenitors of halos on this task
-            if (itask==ThisTask) {
-#endif
-            itemp=0;
-            //k+1 is halo indexing versus halo id values
-            while (pprogen[itime][hid].ProgenitorList[itemp]!=k+1) {itemp++;}
-            for (Int_t j=itemp;j<pprogen[itime][hid].NumberofProgenitors-1;j++) {
-                pprogen[itime][hid].ProgenitorList[j]=pprogen[itime][hid].ProgenitorList[j+1];
-                pprogen[itime][hid].Merit[j]=pprogen[itime][hid].Merit[j+1];
-                if (pprogen[itime][hid].nsharedfrac!=NULL) pprogen[itime][hid].nsharedfrac[j]=pprogen[itime][hid].nsharedfrac[j+1];
-            }
-            pprogen[itime][hid].NumberofProgenitors--;
-#ifdef USEMPI
-            }
-#endif
-        }
-    }
-}
-
-//@}
 
 ///\name Multistep linking routines for descendant based searches
 //@{

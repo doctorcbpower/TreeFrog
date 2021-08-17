@@ -99,12 +99,12 @@ HaloTreeData *ReadData(Options &opt)
 #endif
     int i,nthreads;
     nthreads=1;
-#ifdef USEOPENMP
-#pragma omp parallel
-    {
-            if (omp_get_thread_num()==0) nthreads=omp_get_num_threads();
-    }
-#endif
+//#ifdef USEOPENMP
+//#pragma omp parallel
+//    {
+//            if (omp_get_thread_num()==0) nthreads=omp_get_num_threads();
+//    }
+//#endif
 
 #ifdef USEMPI
     if (ThisTask==0) {
@@ -136,22 +136,22 @@ HaloTreeData *ReadData(Options &opt)
     if (opt.iverbose==1) cout<<"Reading data"<<endl;
 #endif
 
-#if (defined(USEOPENMP) && !defined(USEMPI))
-#pragma omp parallel default(shared) \
-private(i)
-{
-#pragma omp for reduction(+:tothalos)
-#endif
+//#if (defined(USEOPENMP) && !defined(USEMPI))
+//#pragma omp parallel default(shared) \
+//private(i)
+//{
+//#pragma omp for reduction(+:tothalos)
+//#endif
     for(i=0; i<opt.numsnapshots; i++)
     {
 #ifdef USEMPI
         //if mpi only read relavant data
         if (i>=StartSnap && i<EndSnap) {
 #endif
-            if (opt.ioformat==DSUSSING) HaloTree[i].Halo=ReadHaloData(buf[i],HaloTree[i].numhalos);
-            else if (opt.ioformat==DCATALOG) HaloTree[i].Halo=ReadHaloGroupCatalogData(buf[i],HaloTree[i].numhalos, opt.nmpifiles, opt.ibinary,opt.ifield, opt.itypematch,opt.iverbose);
-            else if (opt.ioformat==DNIFTY) HaloTree[i].Halo=ReadNIFTYData(buf[i],HaloTree[i].numhalos, opt.idcorrectflag);
-            else if (opt.ioformat==DVOID) HaloTree[i].Halo=ReadVoidData(buf[i],HaloTree[i].numhalos, opt.idcorrectflag);
+//            if (opt.ioformat==DSUSSING) HaloTree[i].Halo=ReadHaloData(buf[i],HaloTree[i].numhalos);
+            if (opt.ioformat==DCATALOG) HaloTree[i].Halo=ReadHaloGroupCatalogData(buf[i],HaloTree[i].numhalos, opt.nmpifiles, opt.ibinary,opt.ifield, opt.itypematch,opt.iverbose);
+//            else if (opt.ioformat==DNIFTY) HaloTree[i].Halo=ReadNIFTYData(buf[i],HaloTree[i].numhalos, opt.idcorrectflag);
+//            else if (opt.ioformat==DVOID) HaloTree[i].Halo=ReadVoidData(buf[i],HaloTree[i].numhalos, opt.idcorrectflag);
 #ifdef USEMPI
             //if mpi then there is data overlap so only add to total if no overlap
             if (ThisTask<NProcs-1 && NProcs>1) {
@@ -168,9 +168,9 @@ private(i)
 #endif
 
     }
-#if (defined(USEOPENMP) && !defined(USEMPI))
-}
-#endif
+//#if (defined(USEOPENMP) && !defined(USEMPI))
+//}
+//#endif
 
 #ifdef USEMPI
     cout<<ThisTask<<" has ---- "<<tothalos<<endl;

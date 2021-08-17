@@ -399,7 +399,7 @@ void usage(void)
     cerr<<" ========================= "<<endl;
     cerr<<"-D <Direction of tree. Default (" <<opt.isearchdirection<<") Possibilities are : \n";
     cerr<<'\t'<<SEARCHPROGEN<<" progenitor, \n";
-    cerr<<'\t'<<SEARCHDESCEN<<" descendant, \n";
+//    cerr<<'\t'<<SEARCHDESCEN<<" descendant, \n";
     cerr<<'\t'<<SEARCHALL<<" both directions \n";
     cerr<<"-T <type of particles to cross correlate. Default ("<<opt.itypematch<<"). Possibilities are :\n";
     cerr<<'\t'<<ALLTYPEMATCH<<" is all particle types, \n";
@@ -536,25 +536,25 @@ inline void ConfigCheck(Options &opt)
             }
         }
         else {
-            if(opt.isearchdirection==SEARCHDESCEN) {
-                opt.icorematchtype=PARTLISTCORE;
-                opt.min_numpart=5;
-                opt.particle_frac=0.4;
-                opt.meritlimit=0.05;
-                opt.imerittype=MERITRankWeightedBoth;
-                opt.imultsteplinkcrit=MSLCMERITPRIMARYPROGEN;
-                opt.iopttemporalmerittype=GENERALIZEDMERITTIMEPROGEN;
-                opt.icorematchtype=PARTLISTCORE;
-                opt.meritratiolimit=5.0;
-            }
-            else if (opt.isearchdirection==SEARCHPROGEN) {
+//            if(opt.isearchdirection==SEARCHDESCEN) {
+//                opt.icorematchtype=PARTLISTCORE;
+//                opt.min_numpart=5;
+//                opt.particle_frac=0.4;
+//                opt.meritlimit=0.05;
+//                opt.imerittype=MERITRankWeightedBoth;
+//                opt.imultsteplinkcrit=MSLCMERITPRIMARYPROGEN;
+//                opt.iopttemporalmerittype=GENERALIZEDMERITTIMEPROGEN;
+//                opt.icorematchtype=PARTLISTCORE;
+//                opt.meritratiolimit=5.0;
+//            }
+//            else if (opt.isearchdirection==SEARCHPROGEN) {
                 opt.icorematchtype=PARTLISTCORECORE;
                 opt.particle_frac=0.4;
                 opt.meritlimit=0.05;
                 opt.imerittype=MERITNsharedN1N2;
                 opt.imultsteplinkcrit=MSLCMERIT;
                 opt.iopttemporalmerittype=GENERALIZEDMERITTIME;
-            }
+//            }
         }
     }
     if (opt.icatalog==DCROSSCAT) {
@@ -581,7 +581,7 @@ inline void ConfigCheck(Options &opt)
     //now set description
     opt.description=(char*)"Produce tree in direction of  ";
     if(opt.isearchdirection==SEARCHPROGEN)      opt.description+=(char*)"progenitors |";
-    else if(opt.isearchdirection==SEARCHDESCEN)      opt.description+=(char*)"descendants |";
+//    else if(opt.isearchdirection==SEARCHDESCEN)      opt.description+=(char*)"descendants |";
     else if(opt.isearchdirection==SEARCHALL)      opt.description+=(char*)"both forward (descendant) and backward (progenitor) |";
 
     opt.description+=(char*)"TreeFrog Tree constructed by identifying the link with the highest value of ";
@@ -615,13 +615,13 @@ inline void ConfigCheck(Options &opt)
         opt.description+=(char*)" Fractions of paritcles from which merit calculated with ";opt.description+=to_string(opt.particle_frac);
         opt.description+=(char*)" with lower particle number limit of ";opt.description+=to_string(opt.min_numpart);
         opt.description+=(char*)" | ";
-        if (opt.isearchdirection==SEARCHDESCEN) {
-            opt.description+=(char*)" Core match type is core to all initially, followed by a reranking based on core to core matching | ";
-        }
-        else if (opt.isearchdirection==SEARCHPROGEN) {
+//        if (opt.isearchdirection==SEARCHDESCEN) {
+//            opt.description+=(char*)" Core match type is core to all initially, followed by a reranking based on core to core matching | ";
+//        }
+//        else if (opt.isearchdirection==SEARCHPROGEN) {
             if (opt.icorematchtype==PARTLISTCORE) opt.description+=(char*)" Core match type is core to all  | ";
             else if (opt.icorematchtype==PARTLISTCORECORE) opt.description+=(char*)" Core match type is all to all initially, followed by a reranking based on core to core matching | ";
-        }
+//        }
     }
 
     opt.description+=(char*)"Merit threshold is  ";

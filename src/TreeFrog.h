@@ -10,9 +10,9 @@
 
 #define TREEFROG 1.20
 
-#ifdef USEOPENMP
-#include <omp.h>
-#endif
+//#ifdef USEOPENMP
+//#include <omp.h>
+//#endif
 
 #endif
 
